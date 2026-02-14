@@ -25,13 +25,13 @@ from typing import List, TYPE_CHECKING, Dict
 from PyQt6.QtCore import QRunnable, QThread, pyqtSignal
 from chess.pgn import read_game
 from src.helpers import get_appdata_path, Status
-from src.models.claims import get_players
+from src.models.claims import get_players, Claims
 from src.models.download import check_download, download_pgn
 
 if TYPE_CHECKING:
     from src.controllers import SourceDialogController
     from src.views.dialog_view import SourceHBox
-    from src.models.claims import Claims
+    from src.models.game_tracker import GameTracker
     from threading import Event, Lock
     from PyQt6.QtGui import QAction
 
@@ -111,21 +111,24 @@ class Scan(QThread):
     Attributes:
         filename: The path of the combined pgn file.
         claims: An Object of Claims Class.
+        game_tracker: Tracks all games and their state.
         lock: The fileLock for the games.pgn between CheckPgn and MakePgn threads.
         live_pgn_option: The checkbox object on the menu.
         stop_event: A stop signal that is emitted to stop this thread execution
     """
-    __slots__ = ["filename", "claims", "lock", "live_pgn_option", "stop_event"]
+    __slots__ = ["filename", "claims", "game_tracker", "lock", "live_pgn_option", "stop_event"]
 
     add_entry_signal = pyqtSignal(tuple)
     status_signal = pyqtSignal(Status)
     games_count_signal = pyqtSignal(int)
+    game_update_signal = pyqtSignal(str)  # Emits players string when a game is updated
     INTERVAL = 4
 
-    def __init__(self, claims: Claims, filename: str, lock: Lock, live_pgn_option: QAction, stop_event: Event):
+    def __init__(self, claims: Claims, game_tracker: GameTracker, filename: str, lock: Lock, live_pgn_option: QAction, stop_event: Event):
         super().__init__()
         self.filename = filename
         self.claims = claims
+        self.game_tracker = game_tracker
         self.lock = lock
         self.live_pgn_option = live_pgn_option
         self.stop_event = stop_event
@@ -160,16 +163,55 @@ class Scan(QThread):
                     break
 
                 games_in_scan += 1
+                players = get_players(game)
+                board = self.claims.get_board_number(game)
 
-                if self.live_pgn_option.isChecked() and game.headers["Result"] != "*":
+                # Count moves and get last move, handling potential errors
+                move_count = 0
+                last_move = ""
+                has_error = False
+                error_at_move = None
+
+                try:
+                    game_board = game.board()
+                    for move in game.mainline_moves():
+                        move_count += 1
+                        try:
+                            san = game_board.san(move)
+                            game_board.push(move)
+                            last_move = self.claims.get_printable_move(move_count, san)
+                        except Exception:
+                            has_error = True
+                            error_at_move = move_count
+                            last_move = f"Error at move {move_count}"
+                            break
+                except Exception:
+                    has_error = True
+                    last_move = "Parse error"
+
+                # Update game tracker for ALL games
+                tracked_game = self.game_tracker.update_game(
+                    game, players, board, move_count, last_move, has_error, error_at_move
+                )
+                self.game_update_signal.emit(players)
+
+                # Skip claim checking only if live_pgn is checked AND game is finished
+                # (we now process finished games for claims too)
+                if self.live_pgn_option.isChecked() and game.headers.get("Result", "*") != "*":
                     continue
 
-                if get_players(game) in self.claims.dont_check:
+                if players in self.claims.dont_check:
                     continue
+
+                if has_error:
+                    continue  # Skip claim checking for games with errors
 
                 entries = self.claims.check_game(game)
                 for entry in entries:
                     self.add_entry_signal.emit(entry)
+                    # Also track claims in the game tracker
+                    self.game_tracker.add_claim_to_game(players, entry[0].value)
+                    self.game_update_signal.emit(players)
 
         self.games_count_signal.emit(games_in_scan)
         self.lock.release()

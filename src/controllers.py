@@ -27,6 +27,7 @@ from PyQt6.QtCore import QThreadPool
 from PyQt6.QtWidgets import QApplication
 from src.helpers import get_appdata_path, Status
 from src.models.claims import Claims
+from src.models.game_tracker import GameTracker
 from src.models.workers import CheckDownload, DownloadGames, MakePgn, Scan, Stop
 from src.views.dialog_view import AddSourceDialog
 from src.views.dialog_view import SourceHBox
@@ -39,14 +40,16 @@ class ChessClaimController(QApplication):
     Attributes:
         model: Object of the Claims Class.
         view: The main views(GUI) of the application.
+        game_tracker: Tracks all games and their state.
     """
     __slots__ = ['view', 'model', 'sources_dialog', 'make_pgn_worker', 'stop_worker', 'download_worker', 'scan_worker',
-                 'stop_event']
+                 'stop_event', 'game_tracker']
 
     def __init__(self) -> None:
         super().__init__(sys.argv)
         self.view = ChessClaimView(self)
         self.model = Claims()
+        self.game_tracker = GameTracker()
         self.sources_dialog = None
 
         self.make_pgn_worker = None
@@ -195,14 +198,19 @@ class ChessClaimController(QApplication):
         app_path = get_appdata_path()
         filename = os.path.join(app_path, "games.pgn")
 
-        self.scan_worker = Scan(self.model, filename, lock, self.view.live_pgn_option, self.stop_event)
+        self.scan_worker = Scan(self.model, self.game_tracker, filename, lock, self.view.live_pgn_option, self.stop_event)
         self.scan_worker.add_entry_signal.connect(self.update_claims_table)
         self.scan_worker.status_signal.connect(self.update_bar_scan_status)
         self.scan_worker.games_count_signal.connect(self.update_games_count)
+        self.scan_worker.game_update_signal.connect(self.update_game_display)
         self.scan_worker.start()
 
     def update_games_count(self, count: int) -> None:
         self.view.set_games_count(count)
+
+    def update_game_display(self, players: str) -> None:
+        if players in self.game_tracker.games:
+            self.view.update_game_in_table(self.game_tracker.games[players])
 
 
 class SourceDialogController:
