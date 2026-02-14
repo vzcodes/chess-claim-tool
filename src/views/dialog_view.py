@@ -137,7 +137,7 @@ class SourceHBox(QWidget):
         self.source_value.setPlaceholderText("https://example.com/pgn/games.pgn")
 
         # Choose File Button in case of the Local File Option
-        self.choose_button = QPushButton("Choose File")
+        self.choose_button = QPushButton("Choose File(s)")
         self.choose_button.clicked.connect(self.on_choose_button_clicked)
         self.choose_button.setHidden(True)
 
@@ -216,12 +216,16 @@ class SourceHBox(QWidget):
                                                                  transformMode=Qt.TransformationMode.SmoothTransformation))
 
     def on_choose_button_clicked(self) -> None:
-        """ Opens a file explorer for the user to choose a file.
+        """ Opens a file explorer for the user to choose one or more files.
         Trigger: User clicks the "Choose File" button of the Horizontal Box.
         """
-        filename, _ = QFileDialog.getOpenFileName(self, "Select File", "", "PGN Files (*.pgn)")
-        if filename:
-            self.source_value.setText(filename)
+        filenames, _ = QFileDialog.getOpenFileNames(self, "Select Files", "", "PGN Files (*.pgn)")
+        if filenames:
+            # Set first file in this source row
+            self.source_value.setText(filenames[0])
+            # Add additional source rows for remaining files
+            for filename in filenames[1:]:
+                self.dialog.add_source(1, filename)  # 1 = Local file option
 
 
 class BottomBox(QWidget):

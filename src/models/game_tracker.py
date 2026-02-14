@@ -7,6 +7,7 @@ last update time, and game status.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from threading import Lock
 from typing import Dict, Optional, List
 from chess.pgn import Game
 
@@ -49,20 +50,22 @@ class TrackedGame:
 
 class GameTracker:
     """
-    Tracks all games being scanned across scan cycles.
+    Thread-safe tracker for all games being scanned across scan cycles.
     
     Attributes:
         games: Dictionary mapping player string to TrackedGame
+        _lock: Threading lock for thread-safe access.
     """
     
     def __init__(self):
         self.games: Dict[str, TrackedGame] = {}
+        self._lock = Lock()
     
     def update_game(self, game: Game, players: str, board: str, 
                     move_count: int, last_move: str, 
                     has_error: bool = False, error_at_move: Optional[int] = None) -> TrackedGame:
         """
-        Update or create a tracked game entry.
+        Update or create a tracked game entry. Thread-safe.
         
         Returns the TrackedGame (new or updated).
         """
@@ -76,38 +79,40 @@ class GameTracker:
         if has_error:
             status = GameStatus.INVALID
         
-        if players in self.games:
-            existing = self.games[players]
-            # Only update timestamp if move count changed
-            if move_count != existing.move_count:
-                existing.last_update = datetime.now()
-            existing.move_count = move_count
-            existing.status = status
-            existing.result = result
-            existing.last_move = last_move
-            existing.has_error = has_error
-            existing.error_at_move = error_at_move
-            return existing
-        else:
-            tracked = TrackedGame(
-                players=players,
-                board=board,
-                move_count=move_count,
-                last_update=datetime.now(),
-                status=status,
-                result=result,
-                last_move=last_move,
-                has_error=has_error,
-                error_at_move=error_at_move
-            )
-            self.games[players] = tracked
-            return tracked
+        with self._lock:
+            if players in self.games:
+                existing = self.games[players]
+                # Only update timestamp if move count changed
+                if move_count != existing.move_count:
+                    existing.last_update = datetime.now()
+                existing.move_count = move_count
+                existing.status = status
+                existing.result = result
+                existing.last_move = last_move
+                existing.has_error = has_error
+                existing.error_at_move = error_at_move
+                return existing
+            else:
+                tracked = TrackedGame(
+                    players=players,
+                    board=board,
+                    move_count=move_count,
+                    last_update=datetime.now(),
+                    status=status,
+                    result=result,
+                    last_move=last_move,
+                    has_error=has_error,
+                    error_at_move=error_at_move
+                )
+                self.games[players] = tracked
+                return tracked
     
     def add_claim_to_game(self, players: str, claim_type: str) -> None:
-        """Add a claim to a tracked game."""
-        if players in self.games:
-            if claim_type not in self.games[players].claims:
-                self.games[players].claims.append(claim_type)
+        """Add a claim to a tracked game. Thread-safe."""
+        with self._lock:
+            if players in self.games:
+                if claim_type not in self.games[players].claims:
+                    self.games[players].claims.append(claim_type)
     
     def get_all_games(self) -> List[TrackedGame]:
         """Returns list of all tracked games."""

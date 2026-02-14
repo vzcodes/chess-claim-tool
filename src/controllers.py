@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import QApplication
 from src.helpers import get_appdata_path, Status
 from src.models.claims import Claims
 from src.models.game_tracker import GameTracker
-from src.models.workers import CheckDownload, DownloadGames, MakePgn, Scan, Stop
+from src.models.workers import CheckDownload, DownloadGames, ScanFile, Stop
 from src.views.dialog_view import AddSourceDialog
 from src.views.dialog_view import SourceHBox
 from src.views.main_view import ChessClaimView, sources_warning
@@ -42,8 +42,8 @@ class ChessClaimController(QApplication):
         view: The main views(GUI) of the application.
         game_tracker: Tracks all games and their state.
     """
-    __slots__ = ['view', 'model', 'sources_dialog', 'make_pgn_worker', 'stop_worker', 'download_worker', 'scan_worker',
-                 'stop_event', 'game_tracker']
+    __slots__ = ['view', 'model', 'sources_dialog', 'stop_worker', 'download_worker', 'scan_workers',
+                 'stop_event', 'game_tracker', 'file_game_counts']
 
     def __init__(self) -> None:
         super().__init__(sys.argv)
@@ -52,10 +52,10 @@ class ChessClaimController(QApplication):
         self.game_tracker = GameTracker()
         self.sources_dialog = None
 
-        self.make_pgn_worker = None
         self.download_worker = None
-        self.scan_worker = None
+        self.scan_workers = []  # List of per-file scan workers
         self.stop_worker = None
+        self.file_game_counts = {}  # Track game count per file
 
         self.stop_event = Event()
 
@@ -77,12 +77,18 @@ class ChessClaimController(QApplication):
         """
         if not self.sources_dialog:
             self.sources_dialog = SourceDialogController()
-            self.sources_dialog.view.accepted.connect(self.update_status_bar_sources)
+            self.sources_dialog.view.accepted.connect(self.on_sources_changed)
             self.sources_dialog.do_start()
             return
 
         self.on_stop_button_clicked()
         self.sources_dialog.do_resume()
+
+    def on_sources_changed(self) -> None:
+        """ Called when sources dialog is accepted. Clears game state for fresh scan. """
+        self.game_tracker.clear()
+        self.view.clear_games_table()
+        self.update_status_bar_sources()
 
     def on_scan_button_clicked(self) -> None:
         """ Creates the necessary thread(workers) in order to scan the pgn(s)
@@ -94,32 +100,32 @@ class ChessClaimController(QApplication):
             sources_warning()
             return
 
-        """ If the scan thread is alive it means the scan button is already
+        """ If any scan thread is alive it means the scan button is already
         clicked before. So if the user click it again nothing should happen."""
-        if self.scan_worker and self.scan_worker.isRunning():
+        if self.scan_workers and any(w.isRunning() for w in self.scan_workers):
             return
 
         self.view.clear_table()
         self.view.change_scan_button_text(Status.ACTIVE)
+        self.file_game_counts.clear()  # Reset counts for new scan
 
         download_list = self.sources_dialog.get_download_list()
         if download_list:
             self.start_download_worker(download_list)
 
-        games_pgn_mutex = Lock()
-        self.start_make_png_worker(games_pgn_mutex)
-        self.start_scan_worker(games_pgn_mutex)
+        # Start per-file scan workers (no MakePgn needed)
+        self.start_scan_workers()
 
     def on_stop_button_clicked(self) -> None:
         """ Creates a thread in order to stop all the other running Threads(
-        downloadWorker, makePgnWorker,scanWorker)
+        downloadWorker, scanWorkers)
 
         trigger: User clicks the "Stop" Button on the Main Window.
         """
-        if not self.scan_worker or not self.scan_worker.isRunning():
+        if not self.scan_workers or not any(w.isRunning() for w in self.scan_workers):
             return
 
-        self.stop_worker = Stop(self.stop_event, self.make_pgn_worker, self.scan_worker, self.download_worker)
+        self.stop_worker = Stop(self.stop_event, self.scan_workers, self.download_worker)
 
         self.stop_worker.enable_signal.connect(self.on_stop_enable_status)
         self.stop_worker.disable_signal.connect(self.on_stop_disable_status)
@@ -130,6 +136,7 @@ class ChessClaimController(QApplication):
         in order to be ready for the new scan. """
         self.model.empty_dont_check()
         self.model.empty_entries()
+        self.file_game_counts.clear()
 
         # Reset stop event
         self.stop_event.clear()
@@ -189,24 +196,31 @@ class ChessClaimController(QApplication):
         self.download_worker.status_signal.connect(self.update_download_status)
         self.download_worker.start()
 
-    def start_make_png_worker(self, lock: Lock) -> None:
+    def start_scan_workers(self) -> None:
+        """Start a ScanFile worker for each source file."""
         filepaths = self.sources_dialog.get_filepath_list()
-        self.make_pgn_worker = MakePgn(filepaths, self.stop_event, lock)
-        self.make_pgn_worker.start()
+        self.scan_workers = []
+        
+        for filepath in filepaths:
+            worker = ScanFile(
+                self.model,
+                self.game_tracker,
+                filepath,
+                self.view.live_pgn_option,
+                self.stop_event
+            )
+            worker.add_entry_signal.connect(self.update_claims_table)
+            worker.status_signal.connect(self.update_bar_scan_status)
+            worker.games_count_signal.connect(self.update_games_count)
+            worker.game_update_signal.connect(self.update_game_display)
+            worker.start()
+            self.scan_workers.append(worker)
 
-    def start_scan_worker(self, lock: Lock) -> None:
-        app_path = get_appdata_path()
-        filename = os.path.join(app_path, "games.pgn")
-
-        self.scan_worker = Scan(self.model, self.game_tracker, filename, lock, self.view.live_pgn_option, self.stop_event)
-        self.scan_worker.add_entry_signal.connect(self.update_claims_table)
-        self.scan_worker.status_signal.connect(self.update_bar_scan_status)
-        self.scan_worker.games_count_signal.connect(self.update_games_count)
-        self.scan_worker.game_update_signal.connect(self.update_game_display)
-        self.scan_worker.start()
-
-    def update_games_count(self, count: int) -> None:
-        self.view.set_games_count(count)
+    def update_games_count(self, filepath: str, count: int) -> None:
+        """Aggregate game counts from all scan workers."""
+        self.file_game_counts[filepath] = count
+        total = sum(self.file_game_counts.values())
+        self.view.set_games_count(total)
 
     def update_game_display(self, players: str) -> None:
         if players in self.game_tracker.games:
@@ -348,10 +362,7 @@ class SourceDialogController:
         download_list_worker.start()
         download_list_worker.wait()
 
-        make_pgn_worker = MakePgn(self.filepaths)
-        make_pgn_worker.start()
-        make_pgn_worker.join()
-
+        # No longer need MakePgn - files are scanned directly
         self.save_sources()
 
     def save_sources(self) -> None:

@@ -18,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 from enum import Enum
 from math import ceil
+from threading import Lock
 
 from chess.pgn import Game
 
@@ -30,20 +31,30 @@ def get_players(game: Game) -> str:
 
 class Claims:
     """
+    Thread-safe claims checker.
+    
     Attributes:
-        dont_check(list): Is a list of player's names who's their game shall not
+        dont_check(set): Is a set of player's names who's their game shall not
         be checked again. This list is used for games that a 5 Fold Repetition
         or 75 Moves Rule occurred.
-        entries(list): The list of entries. Each element of entries lists
-        is a list ([str,str,str,str]).
+        entries(set): The set of entries. Each element is a tuple.
+        _lock: Threading lock for thread-safe access.
     """
 
     def __init__(self):
         self.dont_check = set()
         self.entries = set()
+        self._lock = Lock()
+
+    def is_in_dont_check(self, players: str) -> bool:
+        """Thread-safe check if players should be skipped."""
+        with self._lock:
+            return players in self.dont_check
 
     def check_game(self, game: Game) -> set:
         """ Checks the game for 3 Fold Repetitions, 5 Fold Repetitions, 50 Move Draw Rule and for the 75 Move Draw Rule.
+        Thread-safe.
+        
         Args:
             game: The game to be checked.
         """
@@ -63,26 +74,31 @@ class Claims:
 
             if board.is_fivefold_repetition():
                 game_entries.add((ClaimType.FIVEFOLD, board_number, players, printable_move))
-                self.dont_check.add(players)
+                with self._lock:
+                    self.dont_check.add(players)
                 break
             if board.is_seventyfive_moves():
                 game_entries.add((ClaimType.SEVENTYFIVE_MOVES, board_number, players, printable_move))
-                self.dont_check.add(players)
+                with self._lock:
+                    self.dont_check.add(players)
                 break
             if board.is_fifty_moves():
                 game_entries.add((ClaimType.FIFTY_MOVES, board_number, players, printable_move))
             if board.is_repetition(count=3):
                 game_entries.add((ClaimType.THREEFOLD, board_number, players, printable_move))
 
-        game_entries = game_entries - self.entries
-        self.entries.update(game_entries)
+        with self._lock:
+            game_entries = game_entries - self.entries
+            self.entries.update(game_entries)
         return game_entries
 
     def empty_dont_check(self) -> None:
-        self.dont_check.clear()
+        with self._lock:
+            self.dont_check.clear()
 
     def empty_entries(self) -> None:
-        self.entries.clear()
+        with self._lock:
+            self.entries.clear()
 
     @staticmethod
     def get_printable_move(move_counter: int, san_move: str) -> str:

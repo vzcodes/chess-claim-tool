@@ -104,8 +104,128 @@ class DownloadGames(QThread):
                 continue
 
 
+class ScanFile(QThread):
+    """ Scans a single PGN file directly for claims.
+    
+    This replaces the old Scan + MakePgn architecture by reading
+    each source file directly, eliminating the copy step.
+
+    Attributes:
+        filename: The path of the PGN file to scan.
+        claims: An Object of Claims Class (thread-safe).
+        game_tracker: Tracks all games and their state (thread-safe).
+        live_pgn_option: The checkbox object on the menu.
+        stop_event: A stop signal that is emitted to stop this thread execution.
+    """
+    __slots__ = ["filename", "claims", "game_tracker", "live_pgn_option", "stop_event"]
+
+    add_entry_signal = pyqtSignal(tuple)
+    status_signal = pyqtSignal(Status)
+    games_count_signal = pyqtSignal(str, int)  # (filepath, count)
+    game_update_signal = pyqtSignal(str)  # Emits players string when a game is updated
+    INTERVAL = 2  # Faster polling since we're not waiting for MakePgn
+
+    def __init__(self, claims: Claims, game_tracker: GameTracker, filename: str, live_pgn_option: QAction, stop_event: Event):
+        super().__init__()
+        self.filename = filename
+        self.claims = claims
+        self.game_tracker = game_tracker
+        self.live_pgn_option = live_pgn_option
+        self.stop_event = stop_event
+
+    def run(self):
+        last_size = 0
+
+        while not self.stop_event.is_set():
+            try:
+                size_of_pgn = os.path.getsize(self.filename)
+            except FileNotFoundError:
+                size_of_pgn = 0
+
+            if self.is_file_updated(last_size, size_of_pgn):
+                self.status_signal.emit(Status.ACTIVE)
+                self.check_pgn()
+
+            self.status_signal.emit(Status.WAIT)
+            last_size = size_of_pgn
+
+            self.stop_event.wait(self.INTERVAL)
+
+    def check_pgn(self):
+        games_in_scan = 0
+
+        try:
+            with open(self.filename) as pgn:
+                while not self.stop_event.is_set():
+                    game = read_game(pgn)
+
+                    if not game:
+                        break
+
+                    games_in_scan += 1
+                    players = get_players(game)
+                    board = self.claims.get_board_number(game)
+
+                    # Count moves and get last move, handling potential errors
+                    move_count = 0
+                    last_move = ""
+                    has_error = False
+                    error_at_move = None
+
+                    try:
+                        game_board = game.board()
+                        for move in game.mainline_moves():
+                            move_count += 1
+                            try:
+                                san = game_board.san(move)
+                                game_board.push(move)
+                                last_move = self.claims.get_printable_move(move_count, san)
+                            except Exception:
+                                has_error = True
+                                error_at_move = move_count
+                                last_move = f"Error at move {move_count}"
+                                break
+                    except Exception:
+                        has_error = True
+                        last_move = "Parse error"
+
+                    # Update game tracker for ALL games (thread-safe)
+                    tracked_game = self.game_tracker.update_game(
+                        game, players, board, move_count, last_move, has_error, error_at_move
+                    )
+                    self.game_update_signal.emit(players)
+
+                    # Skip claim checking only if live_pgn is checked AND game is finished
+                    if self.live_pgn_option.isChecked() and game.headers.get("Result", "*") != "*":
+                        continue
+
+                    if self.claims.is_in_dont_check(players):
+                        continue
+
+                    if has_error:
+                        continue  # Skip claim checking for games with errors
+
+                    entries = self.claims.check_game(game)
+                    for entry in entries:
+                        self.add_entry_signal.emit(entry)
+                        # Also track claims in the game tracker
+                        self.game_tracker.add_claim_to_game(players, entry[0].value)
+                        self.game_update_signal.emit(players)
+        except FileNotFoundError:
+            pass  # File doesn't exist yet, will retry on next interval
+
+        self.games_count_signal.emit(self.filename, games_in_scan)
+
+    @staticmethod
+    def is_file_updated(last_size: int, current_size: int):
+        return current_size != 0 and last_size != current_size
+
+
+# Keep legacy Scan class for backwards compatibility if needed
 class Scan(QThread):
-    """ Continuously looks for a new games.pgn to scan. It creates another thread
+    """ [DEPRECATED] Use ScanFile instead.
+    
+    Continuously looks for a new games.pgn to scan. It creates another thread
     to check the new pgn while it updates the GUI(claimsTable) with new entries.
 
     Attributes:
@@ -222,27 +342,27 @@ class Scan(QThread):
 
 
 class Stop(QThread):
-    """ Stops all the other running Threads(downloadWorker, makePgnWorker,scanWorker)
+    """ Stops all the other running Threads(downloadWorker, scan_workers)
     and resets the model for the next scan.
 
     Attributes:
         stop_event: The stop event that can signal the termination of threads
         download_worker: Running thread, object of Download Class.
-        make_pgn_worker: Running thread, object of makePgn Class.
-        scan_worker: Running thread, object of Scan Class.
+        scan_workers: List of running scan threads (one per file).
+        make_pgn_worker: [DEPRECATED] Running thread, object of makePgn Class.
     """
     enable_signal = pyqtSignal()
     disable_signal = pyqtSignal()
 
-    __slots__ = ["stop_event", "make_pgn_worker", "scan_worker", "download_worker"]
+    __slots__ = ["stop_event", "make_pgn_worker", "scan_workers", "download_worker"]
 
-    def __init__(self, stop_event: Event, make_pgn_worker: Thread, scan_worker: QThread,
-                 download_worker: QThread = None):
+    def __init__(self, stop_event: Event, scan_workers: List[QThread],
+                 download_worker: QThread = None, make_pgn_worker: Thread = None):
         super().__init__()
         self.stop_event = stop_event
         self.download_worker = download_worker
+        self.scan_workers = scan_workers if isinstance(scan_workers, list) else [scan_workers]
         self.make_pgn_worker = make_pgn_worker
-        self.scan_worker = scan_worker
 
     def run(self):
         self.disable_signal.emit()
@@ -250,8 +370,15 @@ class Stop(QThread):
 
         if self.download_worker:
             self.download_worker.wait()
-        self.scan_worker.wait()
-        self.make_pgn_worker.join()
+        
+        # Wait for all scan workers to finish
+        for scan_worker in self.scan_workers:
+            if scan_worker:
+                scan_worker.wait()
+        
+        # Legacy support for MakePgn if still used
+        if self.make_pgn_worker:
+            self.make_pgn_worker.join()
 
         self.enable_signal.emit()
 
