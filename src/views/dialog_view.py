@@ -20,9 +20,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from functools import partial
 from typing import List
 
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QIcon, QPixmap
-from PyQt5.QtWidgets import (QDialog, QWidget, QComboBox, QLineEdit, QPushButton,
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtWidgets import (QDialog, QWidget, QComboBox, QLineEdit, QPushButton,
                              QLabel, QHBoxLayout, QVBoxLayout, QFileDialog)
 from src.helpers import resource_path, Status
 
@@ -46,7 +46,7 @@ class AddSourceDialog(QDialog):
         self.setWindowTitle("PGN Sources")
 
         self.setWindowFlags(self.windowFlags() ^
-                            Qt.WindowContextHelpButtonHint)
+                            Qt.WindowType.WindowContextHelpButtonHint)
         self.layout = None
         self.bottomBox = None
         self.sources: List[SourceHBox] = []
@@ -68,7 +68,7 @@ class AddSourceDialog(QDialog):
 
         # Add all the above elements to layout.
         self.layout = QVBoxLayout()
-        self.layout.addWidget(add_source_button, 1, Qt.AlignRight)
+        self.layout.addWidget(add_source_button, 1, Qt.AlignmentFlag.AlignRight)
         self.layout.addWidget(self.bottomBox)
         self.setLayout(self.layout)
         self.adjustSize()
@@ -210,10 +210,10 @@ class SourceHBox(QWidget):
         """
         if status is Status.OK:
             self.status_image.setPixmap(self.ok_pixmap.scaled(self.dialog.ICON_SIZE, self.dialog.ICON_SIZE,
-                                                              transformMode=Qt.SmoothTransformation))
+                                                              transformMode=Qt.TransformationMode.SmoothTransformation))
         elif status is Status.ERROR:
             self.status_image.setPixmap(self.error_pixmap.scaled(self.dialog.ICON_SIZE, self.dialog.ICON_SIZE,
-                                                                 transformMode=Qt.SmoothTransformation))
+                                                                 transformMode=Qt.TransformationMode.SmoothTransformation))
 
     def on_choose_button_clicked(self) -> None:
         """ Opens a file explorer for the user to choose a file.

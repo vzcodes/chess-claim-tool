@@ -22,10 +22,10 @@ import platform
 from datetime import datetime
 from typing import Optional, Callable, TYPE_CHECKING
 
-from PyQt5.QtCore import Qt, QSize, QEvent
-from PyQt5.QtGui import QStandardItemModel, QPixmap, QMovie, QStandardItem, QColor
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QTreeView, QPushButton, QDesktopWidget,
-                             QAbstractItemView, QHBoxLayout, QVBoxLayout, QLabel, QStatusBar, QMessageBox, QAction,
+from PyQt6.QtCore import Qt, QSize, QEvent
+from PyQt6.QtGui import QStandardItemModel, QPixmap, QMovie, QStandardItem, QColor, QAction
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QTreeView, QPushButton, QApplication,
+                             QAbstractItemView, QHBoxLayout, QVBoxLayout, QLabel, QStatusBar, QMessageBox,
                              QDialog)
 from src.helpers import resource_path, Status
 from src.models.claims import ClaimType
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 def sources_warning():
     """ Displays a Warning Dialog. """
     warning_dialog = QMessageBox()
-    warning_dialog.setIcon(warning_dialog.Warning)
+    warning_dialog.setIcon(QMessageBox.Icon.Warning)
     warning_dialog.setWindowTitle("Warning")
     warning_dialog.setText("PGN File(s) Not Found")
     warning_dialog.setInformativeText("Please enter at least one valid PGN source.")
@@ -86,7 +86,7 @@ class ChessClaimView(QMainWindow):
 
     def center(self) -> None:
         """ Centers the window on the screen """
-        screen = QDesktopWidget().screenGeometry()
+        screen = QApplication.primaryScreen().geometry()
         size = self.geometry()
         self.move(int((screen.width() - size.width()) / 2), int((screen.height() - size.height()) / 2))
 
@@ -125,9 +125,9 @@ class ChessClaimView(QMainWindow):
         about_action.triggered.connect(self.controller.on_about_clicked)
 
     def create_claims_table(self) -> None:
-        self.claims_table.setFocusPolicy(Qt.NoFocus)
-        self.claims_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.claims_table.header().setDefaultAlignment(Qt.AlignCenter)
+        self.claims_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.claims_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.claims_table.header().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         self.claims_table.setSortingEnabled(True)
         self.claims_table.setIndentation(0)
         self.claims_table.setUniformRowHeights(True)
@@ -193,7 +193,7 @@ class ChessClaimView(QMainWindow):
     @staticmethod
     def create_standard_item(item: str, idx: int) -> QStandardItem:
         q_item = QStandardItem(item)
-        q_item.setTextAlignment(Qt.AlignCenter)
+        q_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
         if idx == 2:
             font = q_item.font()
@@ -201,7 +201,7 @@ class ChessClaimView(QMainWindow):
             q_item.setFont(font)
 
         if item == ClaimType.FIVEFOLD.value or item == ClaimType.SEVENTYFIVE_MOVES.value:
-            q_item.setData(QColor(255, 0, 0), Qt.ForegroundRole)
+            q_item.setData(QColor(255, 0, 0), Qt.ItemDataRole.ForegroundRole)
 
         return q_item
 
@@ -274,7 +274,7 @@ class ChessClaimView(QMainWindow):
         row_count = self.claims_table_model.rowCount()
         for index in range(row_count):
             standard_item = QStandardItem(str(index + 1))
-            standard_item.setTextAlignment(Qt.AlignCenter)
+            standard_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.claims_table_model.setItem(index, 0, standard_item)
 
     def clear_table(self):
@@ -356,10 +356,10 @@ class ChessClaimView(QMainWindow):
     def set_pixmap(self, image: QLabel, status: Status):
         if status is Status.OK or status is Status.WAIT:
             image.setPixmap(
-                self.ok_pixmap.scaled(self.ICON_SIZE, self.ICON_SIZE, transformMode=Qt.SmoothTransformation))
+                self.ok_pixmap.scaled(self.ICON_SIZE, self.ICON_SIZE, transformMode=Qt.TransformationMode.SmoothTransformation))
         elif status is Status.ERROR:
             image.setPixmap(
-                self.error_pixmap.scaled(self.ICON_SIZE, self.ICON_SIZE, transformMode=Qt.SmoothTransformation))
+                self.error_pixmap.scaled(self.ICON_SIZE, self.ICON_SIZE, transformMode=Qt.TransformationMode.SmoothTransformation))
 
     def enable_buttons(self):
         self.button_box.scan_button.setEnabled(True)
@@ -397,12 +397,12 @@ class ChessClaimView(QMainWindow):
                 exit_dialog.setWindowTitle("Warning")
                 exit_dialog.setText("Scanning in Progress")
                 exit_dialog.setInformativeText("Do you want to quit?")
-                exit_dialog.setIcon(exit_dialog.Warning)
-                exit_dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
-                exit_dialog.setDefaultButton(QMessageBox.Cancel)
+                exit_dialog.setIcon(QMessageBox.Icon.Warning)
+                exit_dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+                exit_dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
                 replay = exit_dialog.exec()
 
-                if replay == QMessageBox.Yes:
+                if replay == QMessageBox.StandardButton.Yes:
                     event.accept()
                 else:
                     event.ignore()
@@ -454,7 +454,7 @@ class AboutDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("About")
-        self.setWindowFlags(self.windowFlags() ^ Qt.WindowContextHelpButtonHint)
+        self.setWindowFlags(self.windowFlags() ^ Qt.WindowType.WindowContextHelpButtonHint)
 
     def set_gui(self) -> None:
         """ Initialize GUI components. """
@@ -473,10 +473,10 @@ class AboutDialog(QDialog):
         copyright.setObjectName("copyright")
 
         # Align All elements to the center.
-        logo.setAlignment(Qt.AlignCenter)
-        appname.setAlignment(Qt.AlignCenter)
-        version.setAlignment(Qt.AlignCenter)
-        copyright.setAlignment(Qt.AlignCenter)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        appname.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        copyright.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Add all the above elements to layout.
         layout = QVBoxLayout()

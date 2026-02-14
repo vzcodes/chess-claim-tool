@@ -22,7 +22,7 @@ import os.path
 from threading import Thread
 from typing import List, TYPE_CHECKING, Dict
 
-from PyQt5.QtCore import QRunnable, QThread, pyqtSignal
+from PyQt6.QtCore import QRunnable, QThread, pyqtSignal
 from chess.pgn import read_game
 from src.helpers import get_appdata_path, Status
 from src.models.claims import get_players
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from src.views.dialog_view import SourceHBox
     from src.models.claims import Claims
     from threading import Event, Lock
-    from PyQt5.QtWidgets import QAction
+    from PyQt6.QtGui import QAction
 
 
 class CheckDownload(QRunnable):

@@ -23,8 +23,8 @@ import sys
 from threading import Event, Thread, Lock
 from typing import List, Dict
 
-from PyQt5.QtCore import QThreadPool
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtCore import QThreadPool
+from PyQt6.QtWidgets import QApplication
 from src.helpers import get_appdata_path, Status
 from src.models.claims import Claims
 from src.models.workers import CheckDownload, DownloadGames, MakePgn, Scan, Stop
