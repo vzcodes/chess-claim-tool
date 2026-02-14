@@ -114,11 +114,13 @@ class Scan(QThread):
         lock: The fileLock for the games.pgn between CheckPgn and MakePgn threads.
         live_pgn_option: The checkbox object on the menu.
         stop_event: A stop signal that is emitted to stop this thread execution
+        games_count: The total number of games scanned so far.
     """
-    __slots__ = ["filename", "claims", "lock", "live_pgn_option", "stop_event"]
+    __slots__ = ["filename", "claims", "lock", "live_pgn_option", "stop_event", "games_count"]
 
     add_entry_signal = pyqtSignal(tuple)
     status_signal = pyqtSignal(Status)
+    games_count_signal = pyqtSignal(int)
     INTERVAL = 4
 
     def __init__(self, claims: Claims, filename: str, lock: Lock, live_pgn_option: QAction, stop_event: Event):
@@ -128,6 +130,7 @@ class Scan(QThread):
         self.lock = lock
         self.live_pgn_option = live_pgn_option
         self.stop_event = stop_event
+        self.games_count = 0
 
     def run(self):
         last_size = 0
@@ -156,6 +159,9 @@ class Scan(QThread):
 
                 if not game:
                     break
+
+                self.games_count += 1
+                self.games_count_signal.emit(self.games_count)
 
                 if self.live_pgn_option.isChecked() and game.headers["Result"] != "*":
                     continue

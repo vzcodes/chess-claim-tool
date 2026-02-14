@@ -157,6 +157,7 @@ class ChessClaimController(QApplication):
         self.view.change_scan_button_text(Status.STOP)
         self.update_download_status(Status.STOP)
         self.update_bar_scan_status(Status.STOP)
+        self.view.reset_games_count()
 
         self.view.enable_buttons()
         self.view.enable_status_bar()
@@ -197,7 +198,11 @@ class ChessClaimController(QApplication):
         self.scan_worker = Scan(self.model, filename, lock, self.view.live_pgn_option, self.stop_event)
         self.scan_worker.add_entry_signal.connect(self.update_claims_table)
         self.scan_worker.status_signal.connect(self.update_bar_scan_status)
+        self.scan_worker.games_count_signal.connect(self.update_games_count)
         self.scan_worker.start()
+
+    def update_games_count(self, count: int) -> None:
+        self.view.set_games_count(count)
 
 
 class SourceDialogController:

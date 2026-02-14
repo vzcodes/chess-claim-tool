@@ -53,7 +53,7 @@ class ChessClaimView(QMainWindow):
     ICON_SIZE = 16
     __slots__ = ["controller", "claims_table", "live_pgn_option", "claims_table_model", "button_box", "ok_pixmap",
                  "error_pixmap", "source_label", "source_image", "download_label", "download_image", "scan_label",
-                 "scan_image", "spinner", "status_bar", "about_dialog", "notification"]
+                 "scan_image", "spinner", "status_bar", "about_dialog", "notification", "games_count_label"]
 
     def __init__(self, controller: ChessClaimController) -> None:
         super().__init__()
@@ -78,6 +78,7 @@ class ChessClaimView(QMainWindow):
         self.spinner = QMovie(resource_path("spinner.gif"))
         self.status_bar = QStatusBar()
         self.about_dialog = AboutDialog()
+        self.games_count_label = QLabel()
 
         if platform.system() == "Darwin":
             self.notification = Notification()
@@ -155,6 +156,7 @@ class ChessClaimView(QMainWindow):
         self.status_bar.addWidget(self.download_image)
         self.status_bar.addWidget(self.scan_label)
         self.status_bar.addWidget(self.scan_image)
+        self.status_bar.addWidget(self.games_count_label)
         self.status_bar.addPermanentWidget(sources_button)
         self.status_bar.setContentsMargins(10, 5, 9, 5)
 
@@ -337,6 +339,14 @@ class ChessClaimView(QMainWindow):
         elif status is Status.STOP:
             self.scan_label.clear()
             self.scan_image.clear()
+
+    def set_games_count(self, count: int) -> None:
+        """ Updates the games scanned count in the statusBar. """
+        self.games_count_label.setText(f"Games: {count}")
+
+    def reset_games_count(self) -> None:
+        """ Resets the games scanned count. """
+        self.games_count_label.clear()
 
     def change_scan_button_text(self, status: Status) -> None:
         """ Changes the text of the scanButton depending on the status of the application.
