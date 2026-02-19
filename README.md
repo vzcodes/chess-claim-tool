@@ -43,8 +43,15 @@ This version is compatible with the macOS and Windows.
 The program should start by running the main.py
 
 ```
+$ source /.venv/bin/activate
 $ python main.py
 ```
+
+Build releases: 
+```
+$ cd build
+$ pyinstaller mac.spec --clean
+```    
 
 ## Screenshots
 

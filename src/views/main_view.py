@@ -22,13 +22,14 @@ import platform
 from datetime import datetime
 from typing import Optional, Callable, TYPE_CHECKING
 
-from PyQt5.QtCore import Qt, QSize, QEvent
-from PyQt5.QtGui import QStandardItemModel, QPixmap, QMovie, QStandardItem, QColor
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QTreeView, QPushButton, QDesktopWidget,
-                             QAbstractItemView, QHBoxLayout, QVBoxLayout, QLabel, QStatusBar, QMessageBox, QAction,
-                             QDialog)
+from PyQt6.QtCore import Qt, QSize, QEvent, QTimer
+from PyQt6.QtGui import QStandardItemModel, QPixmap, QMovie, QStandardItem, QColor, QAction
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QTreeView, QPushButton, QApplication,
+                             QAbstractItemView, QHBoxLayout, QVBoxLayout, QLabel, QStatusBar, QMessageBox,
+                             QDialog, QTabWidget)
 from src.helpers import resource_path, Status
 from src.models.claims import ClaimType
+from src.models.game_tracker import GameStatus, TrackedGame
 
 if platform.system() == "Darwin":
     from src.notifications.mac import Notification
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
 def sources_warning():
     """ Displays a Warning Dialog. """
     warning_dialog = QMessageBox()
-    warning_dialog.setIcon(warning_dialog.Warning)
+    warning_dialog.setIcon(QMessageBox.Icon.Warning)
     warning_dialog.setWindowTitle("Warning")
     warning_dialog.setText("PGN File(s) Not Found")
     warning_dialog.setInformativeText("Please enter at least one valid PGN source.")
@@ -53,19 +54,22 @@ class ChessClaimView(QMainWindow):
     ICON_SIZE = 16
     __slots__ = ["controller", "claims_table", "live_pgn_option", "claims_table_model", "button_box", "ok_pixmap",
                  "error_pixmap", "source_label", "source_image", "download_label", "download_image", "scan_label",
-                 "scan_image", "spinner", "status_bar", "about_dialog", "notification"]
+                 "scan_image", "spinner", "status_bar", "about_dialog", "notification", "games_count_label",
+                 "games_table", "games_table_model", "tab_widget", "refresh_timer"]
 
     def __init__(self, controller: ChessClaimController) -> None:
         super().__init__()
         self.controller = controller
 
-        self.resize(720, 275)
+        self.resize(820, 350)
         self.setWindowTitle('Chess Claim Tool')
         self.center()
 
         self.claims_table = QTreeView()
+        self.games_table = QTreeView()
         self.live_pgn_option = QAction('Live PGN', self)
         self.claims_table_model = QStandardItemModel()
+        self.games_table_model = QStandardItemModel()
         self.button_box = ButtonBox()
         self.ok_pixmap = QPixmap(resource_path("check_icon.png"))
         self.error_pixmap = QPixmap(resource_path("error_icon.png"))
@@ -78,6 +82,9 @@ class ChessClaimView(QMainWindow):
         self.spinner = QMovie(resource_path("spinner.gif"))
         self.status_bar = QStatusBar()
         self.about_dialog = AboutDialog()
+        self.games_count_label = QLabel()
+        self.tab_widget = QTabWidget()
+        self.refresh_timer = QTimer()
 
         if platform.system() == "Darwin":
             self.notification = Notification()
@@ -86,7 +93,7 @@ class ChessClaimView(QMainWindow):
 
     def center(self) -> None:
         """ Centers the window on the screen """
-        screen = QDesktopWidget().screenGeometry()
+        screen = QApplication.primaryScreen().geometry()
         size = self.geometry()
         self.move(int((screen.width() - size.width()) / 2), int((screen.height() - size.height()) / 2))
 
@@ -95,14 +102,23 @@ class ChessClaimView(QMainWindow):
 
         self.create_menu()
         self.create_claims_table()
+        self.create_games_table()
         self.create_status_bar()
 
         self.button_box.set_scan_button_callback(self.controller.on_scan_button_clicked)
         self.button_box.set_stop_button_callback(self.controller.on_stop_button_clicked)
 
+        # Set up tab widget with Claims and Games tables
+        self.tab_widget.addTab(self.claims_table, "Claims")
+        self.tab_widget.addTab(self.games_table, "Games")
+
+        # Set up timer to refresh games table time display
+        self.refresh_timer.timeout.connect(self.refresh_games_time)
+        self.refresh_timer.start(1000)  # Refresh every second
+
         container_layout = QVBoxLayout()
         container_layout.setSpacing(0)
-        container_layout.addWidget(self.claims_table)
+        container_layout.addWidget(self.tab_widget)
         container_layout.addWidget(self.button_box)
 
         container_widget = QWidget()
@@ -125,9 +141,9 @@ class ChessClaimView(QMainWindow):
         about_action.triggered.connect(self.controller.on_about_clicked)
 
     def create_claims_table(self) -> None:
-        self.claims_table.setFocusPolicy(Qt.NoFocus)
-        self.claims_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.claims_table.header().setDefaultAlignment(Qt.AlignCenter)
+        self.claims_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.claims_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.claims_table.header().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         self.claims_table.setSortingEnabled(True)
         self.claims_table.setIndentation(0)
         self.claims_table.setUniformRowHeights(True)
@@ -135,6 +151,18 @@ class ChessClaimView(QMainWindow):
         labels = ["#", "Timestamp", "Type", "Board", "Players", "Move"]
         self.claims_table_model.setHorizontalHeaderLabels(labels)
         self.claims_table.setModel(self.claims_table_model)
+
+    def create_games_table(self) -> None:
+        self.games_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.games_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.games_table.header().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.games_table.setSortingEnabled(True)
+        self.games_table.setIndentation(0)
+        self.games_table.setUniformRowHeights(True)
+
+        labels = ["Board", "Players", "Moves", "Last Move", "Time Since", "Status", "Claims"]
+        self.games_table_model.setHorizontalHeaderLabels(labels)
+        self.games_table.setModel(self.games_table_model)
 
     def create_status_bar(self) -> None:
         sources_button = QPushButton("Add Sources")
@@ -155,6 +183,7 @@ class ChessClaimView(QMainWindow):
         self.status_bar.addWidget(self.download_image)
         self.status_bar.addWidget(self.scan_label)
         self.status_bar.addWidget(self.scan_image)
+        self.status_bar.addWidget(self.games_count_label)
         self.status_bar.addPermanentWidget(sources_button)
         self.status_bar.setContentsMargins(10, 5, 9, 5)
 
@@ -193,7 +222,7 @@ class ChessClaimView(QMainWindow):
     @staticmethod
     def create_standard_item(item: str, idx: int) -> QStandardItem:
         q_item = QStandardItem(item)
-        q_item.setTextAlignment(Qt.AlignCenter)
+        q_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
         if idx == 2:
             font = q_item.font()
@@ -201,7 +230,7 @@ class ChessClaimView(QMainWindow):
             q_item.setFont(font)
 
         if item == ClaimType.FIVEFOLD.value or item == ClaimType.SEVENTYFIVE_MOVES.value:
-            q_item.setData(QColor(255, 0, 0), Qt.ForegroundRole)
+            q_item.setData(QColor(255, 0, 0), Qt.ItemDataRole.ForegroundRole)
 
         return q_item
 
@@ -274,13 +303,94 @@ class ChessClaimView(QMainWindow):
         row_count = self.claims_table_model.rowCount()
         for index in range(row_count):
             standard_item = QStandardItem(str(index + 1))
-            standard_item.setTextAlignment(Qt.AlignCenter)
+            standard_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.claims_table_model.setItem(index, 0, standard_item)
 
     def clear_table(self):
         """ Clear all the elements off the Claims Table. """
         for index in range(self.claims_table_model.rowCount()):
             self.claims_table_model.removeRow(0)
+
+    def update_game_in_table(self, game: TrackedGame) -> None:
+        """ Update or add a game in the Games table. """
+        # Find existing row for this game
+        row_index = -1
+        for index in range(self.games_table_model.rowCount()):
+            try:
+                players_item = self.games_table_model.item(index, 1)
+                if players_item and players_item.text() == game.players:
+                    row_index = index
+                    break
+            except AttributeError:
+                pass
+
+        # Create row items
+        items = [
+            game.board,
+            game.players,
+            str(game.move_count),
+            game.last_move,
+            game.time_since_update(),
+            game.status.value,
+            ", ".join(game.claims) if game.claims else "-"
+        ]
+
+        row = []
+        for idx, item in enumerate(items):
+            q_item = QStandardItem(item)
+            q_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            # Color status column
+            if idx == 5:  # Status column
+                if game.status == GameStatus.FINISHED:
+                    q_item.setData(QColor(100, 100, 100), Qt.ItemDataRole.ForegroundRole)
+                elif game.status == GameStatus.INVALID:
+                    q_item.setData(QColor(255, 0, 0), Qt.ItemDataRole.ForegroundRole)
+
+            # Color claims column red if there are critical claims
+            if idx == 6 and game.claims:
+                if any(c in ["5 Fold Repetition", "75 Moves Rule"] for c in game.claims):
+                    q_item.setData(QColor(255, 0, 0), Qt.ItemDataRole.ForegroundRole)
+                else:
+                    q_item.setData(QColor(255, 165, 0), Qt.ItemDataRole.ForegroundRole)  # Orange for drawable
+
+            # Color last move red if there was an error
+            if idx == 3 and game.has_error:
+                q_item.setData(QColor(255, 0, 0), Qt.ItemDataRole.ForegroundRole)
+
+            row.append(q_item)
+
+        if row_index >= 0:
+            # Update existing row
+            for col, item in enumerate(row):
+                self.games_table_model.setItem(row_index, col, item)
+        else:
+            # Add new row
+            self.games_table_model.appendRow(row)
+
+        self.resize_games_table()
+
+    def resize_games_table(self) -> None:
+        """ Resize the games table columns. """
+        for index in range(7):
+            self.games_table.resizeColumnToContents(index)
+
+    def refresh_games_time(self) -> None:
+        """ Refresh the 'Time Since' column for all games. """
+        for index in range(self.games_table_model.rowCount()):
+            players_item = self.games_table_model.item(index, 1)
+            if players_item:
+                players = players_item.text()
+                if hasattr(self.controller, 'game_tracker') and players in self.controller.game_tracker.games:
+                    game = self.controller.game_tracker.games[players]
+                    time_item = QStandardItem(game.time_since_update())
+                    time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.games_table_model.setItem(index, 4, time_item)
+
+    def clear_games_table(self):
+        """ Clear all the elements off the Games Table. """
+        for index in range(self.games_table_model.rowCount()):
+            self.games_table_model.removeRow(0)
 
     def set_sources_status(self, status: Status, valid_sources: Optional[str] = None):
         """ Adds the sources in the statusBar.
@@ -338,6 +448,14 @@ class ChessClaimView(QMainWindow):
             self.scan_label.clear()
             self.scan_image.clear()
 
+    def set_games_count(self, count: int) -> None:
+        """ Updates the games scanned count in the statusBar. """
+        self.games_count_label.setText(f"Games: {count}")
+
+    def reset_games_count(self) -> None:
+        """ Resets the games scanned count. """
+        self.games_count_label.clear()
+
     def change_scan_button_text(self, status: Status) -> None:
         """ Changes the text of the scanButton depending on the status of the application.
         Args:
@@ -356,10 +474,10 @@ class ChessClaimView(QMainWindow):
     def set_pixmap(self, image: QLabel, status: Status):
         if status is Status.OK or status is Status.WAIT:
             image.setPixmap(
-                self.ok_pixmap.scaled(self.ICON_SIZE, self.ICON_SIZE, transformMode=Qt.SmoothTransformation))
+                self.ok_pixmap.scaled(self.ICON_SIZE, self.ICON_SIZE, transformMode=Qt.TransformationMode.SmoothTransformation))
         elif status is Status.ERROR:
             image.setPixmap(
-                self.error_pixmap.scaled(self.ICON_SIZE, self.ICON_SIZE, transformMode=Qt.SmoothTransformation))
+                self.error_pixmap.scaled(self.ICON_SIZE, self.ICON_SIZE, transformMode=Qt.TransformationMode.SmoothTransformation))
 
     def enable_buttons(self):
         self.button_box.scan_button.setEnabled(True)
@@ -397,12 +515,12 @@ class ChessClaimView(QMainWindow):
                 exit_dialog.setWindowTitle("Warning")
                 exit_dialog.setText("Scanning in Progress")
                 exit_dialog.setInformativeText("Do you want to quit?")
-                exit_dialog.setIcon(exit_dialog.Warning)
-                exit_dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
-                exit_dialog.setDefaultButton(QMessageBox.Cancel)
+                exit_dialog.setIcon(QMessageBox.Icon.Warning)
+                exit_dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+                exit_dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
                 replay = exit_dialog.exec()
 
-                if replay == QMessageBox.Yes:
+                if replay == QMessageBox.StandardButton.Yes:
                     event.accept()
                 else:
                     event.ignore()
@@ -454,7 +572,7 @@ class AboutDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("About")
-        self.setWindowFlags(self.windowFlags() ^ Qt.WindowContextHelpButtonHint)
+        self.setWindowFlags(self.windowFlags() ^ Qt.WindowType.WindowContextHelpButtonHint)
 
     def set_gui(self) -> None:
         """ Initialize GUI components. """
@@ -473,10 +591,10 @@ class AboutDialog(QDialog):
         copyright.setObjectName("copyright")
 
         # Align All elements to the center.
-        logo.setAlignment(Qt.AlignCenter)
-        appname.setAlignment(Qt.AlignCenter)
-        version.setAlignment(Qt.AlignCenter)
-        copyright.setAlignment(Qt.AlignCenter)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        appname.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        copyright.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Add all the above elements to layout.
         layout = QVBoxLayout()

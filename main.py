@@ -18,14 +18,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 from sys import exit
 from src.controllers import ChessClaimController
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 from src.helpers import resource_path
 
 if __name__ == '__main__':
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-
     app = ChessClaimController()
     app.setStyle('fusion')
     app.setWindowIcon(QIcon(resource_path("logo.png")))
@@ -35,4 +33,4 @@ if __name__ == '__main__':
     app.setStyleSheet(css)
 
     app.do_start()
-    exit(app.exec_())
+    exit(app.exec())
